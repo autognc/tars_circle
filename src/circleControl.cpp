@@ -16,12 +16,12 @@
 
 
 //Aspects of desired circular path
-float radius = 1, T = 12.5;
+float radius = 1, T = 16;
 float thetadot = 2*pi/T;
 
 // Suscriber/Publisher
 ros::Subscriber vicon_sub;
-ros::Publisher vel_pub,ref_pub;
+ros::Publisher ref_pub;
 
 
 double x,y, theta;
@@ -32,9 +32,10 @@ float rWheel = 0.05;    // radius of wheel, m
 float D = 0.175;         // distance from CoM to wheel, m
 
 geometry_msgs::Pose2D reftraj;
-ros::Time last_received, LastWrite, timeNow, startTime;
-ros::Duration writeDelay(0.25);
+ros::Time last_received, timeNow, LastWrite, startTime;
 
+double delay_period = 0.25;
+ros::Duration writeDelay(delay_period);
 
 std_msgs::Int16MultiArray twist;
 
@@ -101,7 +102,7 @@ void viconCallback(geometry_msgs::PoseStamped rover)
 }
 
 
-
+// Function to calculate motor controller wheel speed inputs given input wheel velocity from kinematics model
 int speedCalc(float wheel_velocity)
 {
 
@@ -114,6 +115,7 @@ int speedCalc(float wheel_velocity)
     // Calculate RPM from angular rate
     RPM = 60*omega/(2*pi);
 
+    // Calculate speed based on RPM and motor capability (max RPM of 104)
     if ((RPM >= -104) & (RPM < 0))
     {
         speed = 63*(RPM+104)/104 + 1;
@@ -127,21 +129,20 @@ int speedCalc(float wheel_velocity)
         speed = 64;
     }
 
-    return speed;// = round(speed);
+    return speed;// = round(speed); // It turns out whole numbers are not required as input to motor controller
+                                    // Either it automatically rounds the input or it is capable of taking decimal inputs
 }
 
 
 
-
+// Write data to serial port
 void writeToPort(char data){
     bool written=false;
     char* write = &data;
-    //ser.flush();
     while(!written){
         try{
             ser.Write(write);
             written=true;
-            //control_motors_sep(0,0,4,0,128);
         }
         catch(std::exception& e){
             continue;
@@ -253,6 +254,8 @@ uint8_t set_baudrate ( uint8_t desired_baudrate, uint8_t address ) {
 
 
 
+
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "teleop_turtle");
@@ -262,32 +265,31 @@ int main(int argc, char** argv)
     ros::Rate loop_rate(freq);
 
     startTime = ros::Time::now();
-    last_received = ros::Time::now();
-    ros::Duration d;
     
-    
-    vel_pub = nh.advertise<std_msgs::Int16MultiArray>("/cmd",10);
     //ref_pub = nh.advertise<geometry_msgs::PoseStamped>("/ref_traj",10);
     ref_pub = nh.advertise<geometry_msgs::Pose2D>("/ref_traj",10);
 
     vicon_sub = nh.subscribe("/vicon", 100, viconCallback);
 
 
-    double time, ref_time;
+    double ref_time;
     double ref_theta;
  
     double J11,J12,J13,J21,J22,J23,J31,J32,J33;
     //reftraj.header.frame_id = "slam";
-    double Pxerr=0.0,Pyerr=0.0,Ptheta_err=0.0,Iyerr=0.0,Ixerr=0.0,Itheta_err=0.0,Dxerr=0.0,Dyerr=0.0,Dtheta_err=0.0,OldErrX=0.0,OldErrY=0.0,OldErrTheta=0.0;
+    double Pxerr=0.0,Pyerr=0.0,Ptheta_err=0.0;
+    double Iyerr=0.0,Ixerr=0.0,Itheta_err=0.0;
+    double Dxerr=0.0,Dyerr=0.0,Dtheta_err=0.0;
+    double OldErrX=0.0,OldErrY=0.0,OldErrTheta=0.0;
 
-    //Parameters defining wheel location on body
+    // Set parameters defining wheel location on body
     double alpha1, alpha2, alpha3, nu;
-    //alpha is angle relative to local frame, nu is offset from x,y axis
+    // alpha: angle relative to local frame
+    // nu:    angle relative to world frame x and y axes 
     alpha1 = 0;
     alpha2 = 2*pi / 3;
     alpha3 = 4*pi / 3;
     nu = 0;
-
 
 
     ser.Open();
@@ -295,21 +297,17 @@ int main(int argc, char** argv)
 
     set_baudrate(2,128);
     set_baudrate(2,129);
-    std::cout<<"Start"<<std::endl;
+    // std::cout<<"Start"<<std::endl;
 
 
-    
-    //while(ros::Time::now().toSec() - startTime.toSec() < loopTime.toSec()+1) {
     while(ros::ok()) {
-
-        d = ros::Time::now() - last_received;
-        time = d.toSec();
 
         timeNow = ros::Time::now();
 
+        // Calculate reference time for trajectory calculation
         ref_time = timeNow.toSec() - startTime.toSec();
 
-        //Publish a reference trajectory to monitor on rviz
+        //Publish a reference trajectory to monitor on rviz --- PoseStamped version (How to deal with rotation via quaternions?)
         //reftraj.pose.position.x = Xt(ref_time);
         //reftraj.pose.position.y = Yt(ref_time);
         //reftraj.pose.position.z = 0;
@@ -371,14 +369,14 @@ int main(int argc, char** argv)
         //Calculate robot speed with PID feedback
         dXc = dXt(ref_time) + Kp*Pxerr + Ki*Ixerr + Kd*Dxerr;
         dYc = dYt(ref_time) + Kp*Pyerr + Ki*Iyerr + Kd*Dyerr;
-        dthetaC = 0 + Kp*Ptheta_err + Ki*Itheta_err + Kd*Dtheta_err;
-        // dXc = 0;
-        // dYc = sqrt(dXt(ref_time)*dXt(ref_time) + dYt(ref_time)*dYt(ref_time));
-        // dYc = radius*thetadot;
-        // dthetaC = 0;
+        dthetaC = thetadot + Kp*Ptheta_err + Ki*Itheta_err + Kd*Dtheta_err;
 
         //Calculate wheel speeds with vanHaendel model
         // dXc is the xdot, dYc is the ydot, dthetaC is the thetadot
+
+        // Update rotation of body frame such that wheel speeds calculated appropriately throughout circular path
+        nu = ref_theta;
+        // nu = 0;
 
         //Make the Jinv matrix
         J11 = -sin(nu);
@@ -395,9 +393,14 @@ int main(int argc, char** argv)
         wheel2 = J21*dXc + J22*dYc + J23*dthetaC;       
         wheel3 = J31*dXc + J32*dYc + J33*dthetaC;      
 
+        //  Calculate wheel speed numbers from wheel velocities:
+        //     - Since wheel2 is input as Motor 1 for Motor Controller 1, multiply output velocity by -1
+        //       due to reversed direction of Motor 1
+        
+        wheel2 = -wheel2;
 
         wheel1speed = speedCalc(wheel1);
-        wheel2speed = speedCalc(-wheel2);
+        wheel2speed = speedCalc(wheel2);
         wheel3speed = speedCalc(wheel3);
 
 
@@ -410,31 +413,49 @@ int main(int argc, char** argv)
         if (wheel3speed < 1) wheel3speed = 1;
         if (wheel3speed > 127) wheel3speed = 127;
 
+        //std::cout<<wheel1speed<<std::endl;
         
-        
+        // QUESTION:
+        // Since this publishes speeds after a write delay, do I need to publish speeds once 
+        // prior to the while loop so that the robot starts at program start?
+
+
+        // Publish commands after specified delay
         if (timeNow-LastWrite>writeDelay)
         {
+            // Input speeds to motor controllers
+            
+            // Motor Controller 1 -- Note: Motor 1 requires negative speed output from kinematics model
             control_motors_sep(6,wheel2speed,7,wheel3speed,128);
+            // Motor Controller Two
             control_motors_sep(6,64,7,wheel1speed,129);
 
-            // control_motors_sep(6,50,7,50,128);
-            // control_motors_sep(6,64,7,92,129);
-
+            // Update LastWrite for next command
             LastWrite = ros::Time::now();
         }
 
 
-
+        // Shutdown program after specified time
+        
         if (ros::Time::now().toSec() - startTime.toSec() >= loopTime.toSec())
         {
-            // control_motors_sep(6,wheel2speed,7,wheel3speed,128);
-            // control_motors_sep(6,64,7,wheel1speed,129);
             control_motors_sep(6,64,7,64,128);
             control_motors_sep(6,64,7,64,129);
+
             break;
         }
         
-        
+
+        // Shutdown program after a rotation
+        /*
+        if (ref_theta >= 2*pi)
+        {
+            control_motors_sep(6,64,7,64,128);
+            control_motors_sep(6,64,7,64,129);
+
+            break;
+        }
+        */
 
         //Publish necessary topics
         ref_pub.publish(reftraj);
