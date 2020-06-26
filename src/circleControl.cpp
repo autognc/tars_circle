@@ -16,7 +16,7 @@
 
 
 //Aspects of desired circular path
-float radius = 2, T = 30;
+float radius = 1, T = 12.5;
 float thetadot = 2*pi/T;
 
 // Suscriber/Publisher
@@ -32,17 +32,16 @@ float rWheel = 0.05;    // radius of wheel, m
 float D = 0.175;         // distance from CoM to wheel, m
 
 geometry_msgs::Pose2D reftraj;
-ros::Time last_received, LastWrite;
-ros::Duration writeDelay(1);
+ros::Time last_received, LastWrite, timeNow, startTime;
+ros::Duration writeDelay(0.25);
 
 
 std_msgs::Int16MultiArray twist;
 
 SerialPort ser("/dev/ttyS0");
 
-ros::Time beginTime;
 ros::Duration runPeriod = ros::Duration(T);
-ros::Time loopTime = beginTime + runPeriod;
+ros::Time loopTime = startTime + runPeriod;
 
 
 double Xt(double time)
@@ -128,7 +127,7 @@ int speedCalc(float wheel_velocity)
         speed = 64;
     }
 
-    return speed = round(speed);
+    return speed;// = round(speed);
 }
 
 
@@ -262,6 +261,7 @@ int main(int argc, char** argv)
     int freq = 10;
     ros::Rate loop_rate(freq);
 
+    startTime = ros::Time::now();
     last_received = ros::Time::now();
     ros::Duration d;
     
@@ -297,13 +297,17 @@ int main(int argc, char** argv)
     set_baudrate(2,129);
     std::cout<<"Start"<<std::endl;
 
-    //while(ros::Time::now() < loopTime) {
+
+    
+    //while(ros::Time::now().toSec() - startTime.toSec() < loopTime.toSec()+1) {
     while(ros::ok()) {
 
         d = ros::Time::now() - last_received;
         time = d.toSec();
 
-        ref_time = last_received.toSec();
+        timeNow = ros::Time::now();
+
+        ref_time = timeNow.toSec() - startTime.toSec();
 
         //Publish a reference trajectory to monitor on rviz
         //reftraj.pose.position.x = Xt(ref_time);
@@ -365,11 +369,13 @@ int main(int argc, char** argv)
         Kd = 0;
 
         //Calculate robot speed with PID feedback
-        //dXc = dXt(ref_time) + Kp*Pxerr + Ki*Ixerr + Kd*Dxerr;
-        dXc = 0;
+        dXc = dXt(ref_time) + Kp*Pxerr + Ki*Ixerr + Kd*Dxerr;
         dYc = dYt(ref_time) + Kp*Pyerr + Ki*Iyerr + Kd*Dyerr;
-        dthetaC = thetadot + Kp*Ptheta_err + Ki*Itheta_err + Kd*Dtheta_err;
-
+        dthetaC = 0 + Kp*Ptheta_err + Ki*Itheta_err + Kd*Dtheta_err;
+        // dXc = 0;
+        // dYc = sqrt(dXt(ref_time)*dXt(ref_time) + dYt(ref_time)*dYt(ref_time));
+        // dYc = radius*thetadot;
+        // dthetaC = 0;
 
         //Calculate wheel speeds with vanHaendel model
         // dXc is the xdot, dYc is the ydot, dthetaC is the thetadot
@@ -391,12 +397,8 @@ int main(int argc, char** argv)
 
 
         wheel1speed = speedCalc(wheel1);
-        wheel2speed = speedCalc(wheel2);
+        wheel2speed = speedCalc(-wheel2);
         wheel3speed = speedCalc(wheel3);
-
-        // wheel1speed = 64;
-        // wheel2speed = 64;
-        // wheel3speed = 64;
 
 
         if (wheel1speed < 1) wheel1speed = 1;
@@ -408,18 +410,31 @@ int main(int argc, char** argv)
         if (wheel3speed < 1) wheel3speed = 1;
         if (wheel3speed > 127) wheel3speed = 127;
 
-
-       
-
-        if (ros::Time::now()-LastWrite>writeDelay)
+        
+        
+        if (timeNow-LastWrite>writeDelay)
         {
-            control_motors_sep(6,wheel2speed,7,wheel1speed,128);
-            control_motors_sep(6,64,7,wheel3speed,129);
+            control_motors_sep(6,wheel2speed,7,wheel3speed,128);
+            control_motors_sep(6,64,7,wheel1speed,129);
+
+            // control_motors_sep(6,50,7,50,128);
+            // control_motors_sep(6,64,7,92,129);
 
             LastWrite = ros::Time::now();
         }
 
 
+
+        if (ros::Time::now().toSec() - startTime.toSec() >= loopTime.toSec())
+        {
+            // control_motors_sep(6,wheel2speed,7,wheel3speed,128);
+            // control_motors_sep(6,64,7,wheel1speed,129);
+            control_motors_sep(6,64,7,64,128);
+            control_motors_sep(6,64,7,64,129);
+            break;
+        }
+        
+        
 
         //Publish necessary topics
         ref_pub.publish(reftraj);
@@ -428,8 +443,9 @@ int main(int argc, char** argv)
 
         
     }
-control_motors_sep(6,64,7,64,129);
+loop_rate.sleep();
 control_motors_sep(6,64,7,64,128);
+control_motors_sep(6,64,7,64,129);
 ser.Close();
 return 0;
 }
