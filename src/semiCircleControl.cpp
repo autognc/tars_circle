@@ -40,11 +40,13 @@ ros::Time last_received, timeNow, LastWrite, startTime;
 geometry_msgs::Twist speeds;
 geometry_msgs::Pose2D callback_data;
 
+double delay_period = .2;
+ros::Duration writeDelay(delay_period);
 
 serial::Serial *ser;
 
 
-ros::Duration loopTime = ros::Duration(1.75*Period);
+ros::Duration loopTime = ros::Duration(1.5*Period);
 
 
 /***********************************************************************************************/
@@ -178,11 +180,13 @@ uint8_t set_baudrate ( uint8_t desired_baudrate, uint8_t address ) {
 
 double Xt(double time)
 {
-    float temp; 
-    temp = radius*cos(time*thetadot);
-
-    if (time > 1.75*Period)
-        temp = 1.5;
+    float temp;
+    if (time < Period/2) 
+        temp = radius*cos(time*thetadot);
+    else if ((time > Period/2) && (time < Period))
+        temp = radius*(time-15)/5; 
+    else 
+        temp = radius;
     
     return temp;
 }
@@ -190,11 +194,10 @@ double Xt(double time)
 double Yt(double time)
 {
     float temp;
-    temp = radius*sin(time*thetadot);
-
-    if (time > 1.75*Period)
+    if (time < Period/2)
+        temp = radius*sin(time*thetadot);
+    else
         temp = 0;
-
     
     return temp;
 }
@@ -202,10 +205,16 @@ double Yt(double time)
 double Thetat(double time)
 {
     float temp;
-    temp = thetadot*time;
-
-    if (time > 1.75*Period)
+    if (time < Period/2)
+        temp = thetadot*time;
+    else if ((time > Period/2) && (time < Period))
+        temp = theta;
+    else if ((time > Period) && (time < 1.5*Period))
         temp = 0;
+    else
+        temp = 0;
+    
+    
 
     return temp;
 }
@@ -213,11 +222,12 @@ double Thetat(double time)
 double dXt(double time)
 {
     float temp;
-    temp = -radius*thetadot*sin(time*thetadot);
-
-    if (time > 1.75*Period)
+    if (time < Period/2)
+        temp = -radius*thetadot*sin(time*thetadot);
+    else if ((time > Period/2) && (time < Period))
+        temp = 0.2;
+    else
         temp = 0;
-
 
     return temp;
 }
@@ -225,9 +235,9 @@ double dXt(double time)
 double dYt(double time)
 {
     float temp;
-    temp = radius*thetadot*cos(time*thetadot);
-
-    if (time > 1.75*Period)
+    if (time < Period/2)
+        temp = radius*thetadot*cos(time*thetadot);
+    else
         temp = 0;
 
     return temp;
@@ -236,9 +246,13 @@ double dYt(double time)
 double dThetat(double time)
 {
     float temp;
-    temp = thetadot;
-
-    if (time > 1.75*Period)
+    if (time < Period/2)
+        temp = thetadot;
+    else if ((time > Period/2) && (time < Period))
+        temp = 0;
+    else if ((time > Period) && (time < 1.5*Period))
+        temp = 0;        
+    else
         temp = 0;
     
     return temp;
@@ -415,18 +429,6 @@ int main(int argc, char** argv)
         Pxerr = (X_err);
         Pyerr = (Y_err);
         Ptheta_err = (Theta_err);
-        if (Pxerr>0.5) {
-            Pxerr = 0.5;
-        }
-        if (Pxerr<-0.5) {
-            Pxerr = -0.5;
-        }
-        if (Pyerr>0.5) {
-            Pyerr = 0.5;
-        }
-        if (Pyerr<-0.5) {
-            Pyerr = -0.5;
-        }
 
         // Integral control:
         Ixerr += (X_err)/freq;
@@ -507,6 +509,26 @@ int main(int argc, char** argv)
         wheel2speed = speedCalc(wheel2, 2);
         wheel3speed = speedCalc(wheel3, 3);
 
+        // if (wheel1speed < 1) wheel1speed = 1;
+        // if (wheel1speed > 127) wheel1speed = 127;
+
+        // if (wheel2speed < 1) wheel2speed = 1;
+        // if (wheel2speed > 127) wheel2speed = 127;
+
+        // if (wheel3speed < 1) wheel3speed = 1;
+        // if (wheel3speed > 127) wheel3speed = 127;
+
+
+        // Saturate wheel speeds
+        // if ((wheel1speed > 49) && (wheel1speed < 64)) { wheel1speed = 49; }
+        // if ((wheel1speed < 79) && (wheel1speed > 64)) { wheel1speed = 79; }
+        
+        // if ((wheel2speed > 49) && (wheel2speed < 64)) { wheel2speed = 49; }
+        // if ((wheel2speed < 79) && (wheel2speed > 64)) { wheel2speed = 79; }
+
+        // if ((wheel3speed > 49) && (wheel3speed < 64)) { wheel3speed = 49; }
+        // if ((wheel3speed < 79) && (wheel3speed > 64)) { wheel3speed = 79; }
+
 
         speeds.linear.x = wheel1speed;
         speeds.linear.y = wheel2speed;
@@ -526,18 +548,32 @@ int main(int argc, char** argv)
         control_motors_sep(6,64,7,wheel1speed,129);
         // control_motors_sep(6,64,7,100,129);
 
+        // Publish commands after specified delay
+        // if (timeNow-LastWrite>writeDelay)
+        // {
+        //     ser->flush();
+        //     // Input speeds to motor controllers
+        //     // Motor Controller 1 -- Note: Motor 1 requires negative speed output from kinematics model
+        //     control_motors_sep(6,wheel3speed,7,wheel2speed,128);
+        //     // Motor Controller 2
+        //     control_motors_sep(6,64,7,wheel1speed,129);
+
+        //     // Update LastWrite for next command
+        //     LastWrite = ros::Time::now();
+        // }
+
 
         // Shutdown program after specified time
         
-        // if (ros::Time::now() - startTime >= loopTime)
-        // {
-        //     ser->flush();
+        if (ros::Time::now() - startTime >= loopTime)
+        {
+            ser->flush();
 
-        //     control_motors_sep(6,64,7,64,128);
-        //     control_motors_sep(6,64,7,64,129);
+            control_motors_sep(6,64,7,64,128);
+            control_motors_sep(6,64,7,64,129);
 
-        //     break;
-        // }
+            break;
+        }
         
 
 
