@@ -14,13 +14,15 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   tf
+  serial
+  vicon
 )
 
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES
-  CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs tf
+  CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs tf serial vicon
   DEPENDS
 )
 
@@ -36,7 +38,10 @@ include_directories(
 
 
 add_executable(circleControl src/circleControl.cpp)
-
 target_link_libraries(circleControl serial ${catkin_LIBRARIES})
 
+add_executable(semiCircleControl src/semiCircleControl.cpp)
+target_link_libraries(semiCircleControl serial ${catkin_LIBRARIES})
 
+add_executable(stop src/stop.cpp)
+target_link_libraries(stop serial ${catkin_LIBRARIES})
