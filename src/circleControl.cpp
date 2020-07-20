@@ -311,7 +311,7 @@ int speedCalc(float wheel_velocity, int wheelNumber)
 
     // Saturate Wheel Speeds
     if ((speed > 49) && (speed < 61)) { speed = 49; }
-    if ((speed < 81) && (speed > 67)) { speed = 81; }
+    if ((speed < 79) && (speed > 67)) { speed = 79; }
 
 
     return speed;
@@ -427,6 +427,12 @@ int main(int argc, char** argv)
         if (Pyerr<-0.5) {
             Pyerr = -0.5;
         }
+        if (Ptheta_err > 0.5) {
+            Ptheta_err = 0.5;
+        }
+        if (Ptheta_err < -0.5) {
+            Ptheta_err = -0.5;
+        }
 
         // Integral control:
         Ixerr += (X_err)/freq;
@@ -462,8 +468,8 @@ int main(int argc, char** argv)
 
         // Set P, I, D values
         double Kp, Ki, Kd, Kp_theta, Ki_theta, Kd_theta;
-        Kp = 0.8;
-        Ki = 0.5;
+        Kp = 0.75;
+        Ki = 0.25;
         Kd = 0;
 
         Kp_theta = 1.75;
